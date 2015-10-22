@@ -12,9 +12,16 @@ import java.security.MessageDigest
 sealed trait ChordMessage
 
 case class Initialize(nodeName:String, nodeHash:BigInt, isFirstNode:Boolean) extends ChordMessage
-case class findFinger(node:ActorRef, i:Int, start:BigInt) extends ChordMessage
-case class updateFinger(before:BigInt, i:Int, node:ActorRef, nodeHash:BigInt) extends ChordMessage
-case class foundFinger(i:Int, successor:ActorRef) extends ChordMessage
+case class FindFinger(node:ActorRef, i:Int, start:BigInt) extends ChordMessage
+case class UpdateFinger(before:BigInt, i:Int, node:ActorRef, nodeHash:BigInt) extends ChordMessage
+case class FoundFinger(i:Int, successor:ActorRef) extends ChordMessage
+case class SetPredecessor(node:ActorRef) extends ChordMessage
+case class SetSuccessor(node:ActorRef) extends ChordMessage
+case class Find(node:ActorRef,code:String, step:Int) extends ChordMessage
+case class FindPosition(node:ActorRef,nodeHash:BigInt) extends ChordMessage
+case class FoundPosition(predecessor:ActorRef,successor:ActorRef) extends ChordMessage
+case class Found(code:String,predecessor:ActorRef,successor:ActorRef,step:Int) extends ChordMessage
+
 
 object project3 extends App{
   
@@ -112,7 +119,7 @@ object project3 extends App{
                     fingerTable(i).setNode(fingerTable(i-1).getNode())
                 }else{
                   if(exist!=null)
-                    exist ! findFinger(self, i, fingerTable(i).getStart())
+                    exist ! FindFinger(self, i, fingerTable(i).getStart())
                 }
             }
         }
@@ -120,7 +127,7 @@ object project3 extends App{
         def updateOthers():Unit = {
           for(i <- 0 to ID_LENGTH-1) {
             val position=(nodeHash - BigInt(2).pow(i)+BigInt(2).pow(ID_LENGTH)+1)%BigInt(2).pow(ID_LENGTH)
-            successor ! updateFinger(position, i, self, nodeHash)
+            successor ! UpdateFinger(position, i, self, nodeHash)
           }
         }
     
@@ -146,43 +153,91 @@ object project3 extends App{
               
               
           }
+          
+          case FoundPosition(predecessor:ActorRef,successor:ActorRef)=>{
+              this.predecessor=predecessor
+              this.successor=successor
+              predecessor!SetSuccessor(self)//Add by myself
+              successor!SetPredecessor(self)
+              InitializeFinger()
+              updateOthers()
+          }
             
-          case findFinger(node:ActorRef, i:Int, start:BigInt)=>{
+          case FindFinger(node:ActorRef, i:Int, start:BigInt)=>{
                 
                 val range = new Range(false, nodeHash, fingerTable(0).getHash(), true)
               
                 if(range.isInclude(start)){
-                  node ! foundFinger(i,successor)
+                  node ! FoundFinger(i,successor)
                 }else{
                   val target = closestPreceedingFinger(start)
-                  target ! findFinger(node,i,start)
+                  target ! FindFinger(node,i,start)
                 }
             }
         
-            case foundFinger(i:Int, successor:ActorRef)=>{
+            case FoundFinger(i:Int, successor:ActorRef)=>{
                 this.fingerTable(i).setNode(successor)
             }
-        
-            case updateFinger(before:BigInt,i:Int,node:ActorRef,nodeHash:BigInt) => { 
-        
-                if(node != self) {
-              
-                  val range1 = new Range(false, nodeHash, fingerTable(0).getHash(), true)
-                  
-                  if (range1.isInclude(before)) { 
+            
+            case FindPosition(node:ActorRef,nodeHash:BigInt)=>{
+                val range = new Range(false, nodeHash, fingerTable(0).getHash(), true)
                 
-                      val range2=new Range(false, nodeHash, fingerTable(i).getHash(), false)
-                                
-                      if(range2.isInclude(nodeHash)){
-                  fingerTable(i).setNode(node)
-                  predecessor ! updateFinger(nodeHash, i, node, nodeHash)
+                if(range.isInclude(nodeHash)){
+                    node!FoundPosition(self,this.successor)
+                }else{
+                    val target = closestPreceedingFinger(nodeHash)
+                    target!FindPosition(node,nodeHash)
                 }
-              }else{
-                val target = closestPreceedingFinger(before)
-                target ! updateFinger(before,i,node,nodeHash)
-              }
             }
-          }
+
+            case FindFinger(node:ActorRef,i:Int,start:BigInt)=>{
+                val range = new Range(false, nodeHash, fingerTable(0).getHash(), true)
+                if(range.isInclude(start)){
+                    node!FoundFinger(i,successor)
+                }else{
+                    val target = closestPreceedingFinger(start)
+                    target!FindFinger(node,i,start)
+                }
+            }
+
+            case Find(node:ActorRef,code:String, step:Int)=>{
+                def id=getHash(code)
+                val range = new Range(false, nodeHash, fingerTable(0).getHash(), true)
+                if(range.isInclude(id)){
+                    node!Found(code,self,successor,step)
+                }else{
+                    val target = closestPreceedingFinger(id)
+                    target!Find(node,code,step+1)
+                }
+            }
+            
+            case Found(code:String,predecessor:ActorRef,successor:ActorRef,step:Int)=>{
+                println("found code %s on node %s using %s steps".format(code.charAt(25),successor.toString().charAt(25),step))
+            }
+
+            case UpdateFinger(before:BigInt,i:Int,node:ActorRef,nodeHash:BigInt) => { 
+                if(node != self) {
+                  val range1 = new Range(false, nodeHash, fingerTable(0).getHash(), true)
+                  if (range1.isInclude(before)) { 
+                    val range2=new Range(false, nodeHash, fingerTable(i).getHash(), false)
+                    if(range2.isInclude(nodeHash)){
+                        fingerTable(i).setNode(node)
+                        predecessor ! UpdateFinger(nodeHash, i, node, nodeHash)
+                    }
+                  }else{
+                      val target = closestPreceedingFinger(before)
+                      target ! UpdateFinger(before,i,node,nodeHash)
+                  }
+                }
+            }
+            
+            case SetPredecessor(node:ActorRef)=>{
+                this.predecessor=node
+            }
+
+            case SetSuccessor(node:ActorRef)=>{
+                this.successor=node
+            }
       }
   }
 }  
